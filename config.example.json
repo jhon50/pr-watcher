@@ -1,0 +1,14 @@
+{
+  "_comment": "Copy to ~/.pr-watcher/config.json (or set PRW_* env vars). Every field is optional — repo and self_login auto-detect from the gh CLI if omitted.",
+
+  "repo": "owner/name",
+  "self_login": "your-github-login",
+
+  "skip_authors": ["some-bot", "a-teammate-you-dont-review"],
+
+  "port": 4747,
+
+  "_merge_comment": "Leave merge_skill unset for a plain 'gh pr merge --squash --delete-branch'. Set it to a Claude skill/slash-command name to run your own merge workflow instead, in target_repo_dir.",
+  "merge_skill": null,
+  "target_repo_dir": null
+}

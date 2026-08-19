@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR Watcher</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔍</text></svg>">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .sev-critical { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+  .sev-important { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+  .sev-suggestion { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+  .sev-nit { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  pre.snippet { background: #0f172a; color: #e2e8f0; padding: .75rem; border-radius: .5rem; overflow-x: auto; font-size: 12px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+<div x-data="app()" x-init="loadMeta(); load(); poll(); loadMyPrs(); pollMyPrs()" class="max-w-7xl mx-auto p-6">
+<div class="flex gap-6 items-start">
+<main class="flex-1 min-w-0 space-y-6">
+
+  <header class="flex items-baseline justify-between">
+    <h1 class="text-2xl font-semibold">PR Watcher</h1>
+    <div class="flex items-center gap-3">
+      <button @click="runWatcher('new_prs')"
+              :disabled="fetching"
+              class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:opacity-60"
+              :class="fetching ? 'cursor-wait' : ''">
+        <span x-show="!fetching">Fetch new PRs</span>
+        <span x-show="fetching">Fetching…</span>
+      </button>
+      <div class="text-xs text-slate-500" x-text="'refreshed ' + lastRefresh"></div>
+    </div>
+  </header>
+
+  <!-- Watchers status -->
+  <section class="grid grid-cols-3 gap-3 text-xs">
+    <template x-for="w in watchers" :key="w.name">
+      <div class="bg-white border rounded-lg p-3">
+        <div class="font-semibold" x-text="w.name"></div>
+        <div class="text-slate-500" x-text="w.last_result || '—'"></div>
+        <div class="text-slate-400 mt-1">
+          last: <span x-text="fmtTime(w.last_run_at)"></span> ·
+          next: <span x-text="fmtTime(w.next_run_at)"></span>
+        </div>
+      </div>
+    </template>
+    <template x-if="watchers.length === 0">
+      <div class="col-span-3 text-slate-400 italic">No watcher runs yet.</div>
+    </template>
+  </section>
+
+  <!-- Head PR -->
+  <section>
+    <h2 class="text-sm font-semibold uppercase text-slate-500 mb-2">
+      Head PRs
+      <span class="text-slate-400" x-show="heads.length > 0">(<span x-text="heads.length"></span>)</span>
+    </h2>
+    <div class="space-y-3">
+    <template x-for="head in heads" :key="head.number">
+      <div class="bg-white rounded-xl border shadow-sm p-5">
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="text-lg font-semibold">
+              <a :href="head.url" target="_blank" class="hover:underline">
+                #<span x-text="head.number"></span> · <span x-text="head.title"></span>
+              </a>
+            </div>
+            <div class="text-sm text-slate-500">by <span x-text="head.author"></span></div>
+            <div class="text-xs text-slate-400 mt-1" x-show="head.jira_summary" x-text="head.jira_summary"></div>
+          </div>
+          <div class="flex gap-2">
+            <button @click="review(head.number)"
+                    class="px-3 py-1.5 rounded-md bg-slate-100 border text-slate-700 text-sm hover:bg-slate-200"
+                    title="Re-run Claude review">
+              Review
+            </button>
+            <button @click="reviewDone(head.number)"
+                    class="px-3 py-1.5 rounded-md bg-blue-100 border border-blue-300 text-blue-800 text-sm hover:bg-blue-200"
+                    title="Mark review done — skips any remaining pending findings and moves the PR to Pending author action">
+              Review done
+            </button>
+            <button @click="approve(head.number)"
+                    class="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700">
+              Approve
+            </button>
+            <button @click="approveIfAddressed(head.number)"
+                    :disabled="checkingAddressed"
+                    class="px-3 py-1.5 rounded-md bg-emerald-100 border border-emerald-300 text-emerald-800 text-sm hover:bg-emerald-200 disabled:opacity-60"
+                    :class="checkingAddressed ? 'cursor-wait' : ''"
+                    title="Run a Claude check on each of your inline comments on this PR. Approves only if all are addressed/explained/minor.">
+              <span x-show="!checkingAddressed">Approve if addressed</span>
+              <span x-show="checkingAddressed">Checking…</span>
+            </button>
+            <button @click="moveOffHead(head.number)"
+                    class="px-3 py-1.5 rounded-md bg-slate-100 border text-slate-700 text-sm hover:bg-slate-200"
+                    title="Move off head — keeps findings, lets another PR take the slot">
+              Move off head
+            </button>
+            <button @click="dismiss(head.number)"
+                    class="px-3 py-1.5 rounded-md bg-slate-200 text-slate-700 text-sm hover:bg-slate-300">
+              Dismiss
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-4 space-y-2">
+          <template x-for="sev in ['critical', 'important', 'suggestion', 'nit']" :key="sev">
+            <div x-show="findingsBySev(head, sev).length > 0">
+              <div class="text-xs font-semibold uppercase tracking-wide mb-1"
+                   :class="{
+                     'text-red-700': sev === 'critical',
+                     'text-amber-700': sev === 'important',
+                     'text-blue-700': sev === 'suggestion',
+                     'text-slate-500': sev === 'nit',
+                   }"
+                   x-text="sev + ' (' + findingsBySev(head, sev).length + ')'"></div>
+              <template x-for="f in findingsBySev(head, sev)" :key="f.id">
+                <details class="rounded-md border mb-1" :class="'sev-' + f.severity">
+                  <summary class="cursor-pointer px-3 py-2 flex items-center justify-between gap-2">
+                    <div class="flex-1 min-w-0">
+                      <span class="font-medium" x-text="f.title"></span>
+                      <span class="text-xs opacity-70 ml-2" x-text="f.file ? (f.file + ':' + f.line) : ''"></span>
+                    </div>
+                    <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-white/60" x-text="f.status"></span>
+                  </summary>
+                  <div class="px-3 pb-3 pt-1 text-sm bg-white/50 space-y-2">
+                    <div x-text="f.message"></div>
+                    <div x-show="f.code_snippet">
+                      <div class="text-xs font-semibold mt-2">Code</div>
+                      <pre class="snippet" x-text="f.code_snippet"></pre>
+                    </div>
+                    <div x-show="f.blast_radius">
+                      <span class="text-xs font-semibold">Blast radius:</span>
+                      <span x-text="f.blast_radius"></span>
+                    </div>
+                    <div x-show="f.confidence">
+                      <span class="text-xs font-semibold">Confidence:</span>
+                      <span x-text="f.confidence"></span>
+                    </div>
+                    <div x-show="f.fix">
+                      <div class="text-xs font-semibold mt-2">Suggested fix</div>
+                      <pre class="snippet" x-text="f.fix"></pre>
+                    </div>
+                    <div class="flex gap-2 pt-2" x-show="f.status === 'pending'">
+                      <button @click="postFinding(f.id)"
+                              class="px-2 py-1 text-xs rounded bg-slate-900 text-white hover:bg-slate-700">Post</button>
+                      <button @click="skipFinding(f.id)"
+                              class="px-2 py-1 text-xs rounded bg-slate-200 hover:bg-slate-300">Skip</button>
+                    </div>
+                  </div>
+                </details>
+              </template>
+            </div>
+          </template>
+          <div x-show="head.findings.length === 0 && head.status === 'queued'" class="text-slate-400 italic text-sm">
+            Queued — no review has run yet. Click <b>Review</b> to start.
+          </div>
+          <div x-show="head.findings.length === 0 && head.status === 'reviewing'" class="text-slate-500 italic text-sm flex items-center gap-2">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" opacity=".25"/>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2"/>
+            </svg>
+            Review in progress — Claude is analysing the PR.
+          </div>
+          <div x-show="head.findings.length === 0 && head.status === 'awaiting_user'" class="text-slate-400 italic text-sm">
+            Review complete. No findings — safe to approve.
+          </div>
+          <div x-show="head.findings.length === 0 && head.status === 'review_failed'" class="text-red-600 text-sm">
+            Review failed. Click <b>Review</b> to retry, or check the server log.
+          </div>
+        </div>
+      </div>
+    </template>
+    <template x-if="heads.length === 0">
+      <div class="bg-white rounded-xl border border-dashed p-6 text-slate-400 text-sm">
+        Queue is empty. Waiting for the next watcher cycle.
+      </div>
+    </template>
+    </div>
+  </section>
+
+  <!-- Pending author action -->
+  <section>
+    <h2 class="text-sm font-semibold uppercase text-slate-500 mb-2">
+      Pending author action
+      <span class="text-slate-400">(<span x-text="awaiting_author.length"></span>)</span>
+    </h2>
+    <div class="space-y-2">
+      <template x-for="p in awaiting_author" :key="p.number">
+        <div class="bg-white border rounded-lg p-3 flex items-center justify-between"
+             :class="p.has_new_activity ? 'border-amber-400 bg-amber-50' : ''">
+          <div>
+            <a :href="p.url" target="_blank" class="font-medium hover:underline">
+              #<span x-text="p.number"></span> · <span x-text="p.title"></span>
+            </a>
+            <div class="text-xs text-slate-500">
+              by <span x-text="p.author"></span> ·
+              <span x-text="p.findings.filter(f => f.status === 'posted').length"></span> posted
+              · updated <span x-text="timeAgo(p.updated_at)"></span>
+              <span x-show="p.has_new_activity" class="ml-2 text-amber-700 font-semibold">RECENT CHANGES</span>
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button @click="approve(p.number)"
+                    class="px-3 py-1 rounded bg-emerald-600 text-white text-xs hover:bg-emerald-700">Approve</button>
+            <button @click="approveIfAddressed(p.number)"
+                    :disabled="checkingAddressed"
+                    class="px-3 py-1 rounded bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs hover:bg-emerald-200 disabled:opacity-60"
+                    :class="checkingAddressed ? 'cursor-wait' : ''"
+                    title="Run a Claude check on each of your inline comments. Approves only if all are addressed/explained/minor.">
+              <span x-show="!checkingAddressed">Approve if addressed</span>
+              <span x-show="checkingAddressed">Checking…</span>
+            </button>
+            <button @click="dismiss(p.number)"
+                    class="px-3 py-1 rounded bg-slate-200 text-xs hover:bg-slate-300">Dismiss</button>
+          </div>
+        </div>
+      </template>
+      <div x-show="awaiting_author.length === 0" class="text-slate-400 italic text-sm">
+        Nothing waiting on authors.
+      </div>
+    </div>
+  </section>
+
+  <!-- Pending review (queue) -->
+  <section>
+    <div class="flex items-baseline justify-between mb-2 gap-3">
+      <h2 class="text-sm font-semibold uppercase text-slate-500">
+        Pending review
+        <span class="text-slate-400">(<span x-text="filteredPendingReview.length"></span><span x-show="authorFilter">/<span x-text="pending_review.length"></span></span>)</span>
+      </h2>
+      <div class="flex items-center gap-2">
+        <select x-model="authorFilter"
+                class="text-xs border rounded px-2 py-1 bg-white">
+          <option value="">All authors</option>
+          <template x-for="a in pendingAuthors" :key="a.login">
+            <option :value="a.login" x-text="a.login + ' (' + a.count + ')'"></option>
+          </template>
+        </select>
+        <button x-show="authorFilter"
+                @click="authorFilter = ''"
+                class="text-xs text-slate-500 hover:text-slate-700 underline">
+          clear
+        </button>
+      </div>
+    </div>
+    <div class="space-y-2">
+      <template x-for="p in filteredPendingReview" :key="p.number">
+        <div class="bg-white border rounded-lg p-3 flex items-center justify-between"
+             :class="p.parked ? 'border-slate-300 bg-slate-50' : ''">
+          <div class="min-w-0">
+            <a :href="p.url" target="_blank" class="font-medium hover:underline">
+              #<span x-text="p.number"></span> · <span x-text="p.title"></span>
+            </a>
+            <div class="text-xs text-slate-500">
+              by <span x-text="p.author"></span> ·
+              <span class="font-mono" x-text="p.status"></span>
+              · opened <span x-text="timeAgo(p.created_at)"
+                            :class="ageDays(p.created_at) >= 3 ? 'text-amber-700 font-semibold' : ''"></span>
+              <span x-show="p.findings.length > 0">
+                · <span x-text="p.findings.length"></span> findings
+                (<span x-text="p.findings.filter(f => f.status === 'posted').length"></span> posted,
+                <span x-text="p.pending_findings"></span> pending)
+              </span>
+              <span x-show="p.parked" class="ml-2 text-slate-500 italic">parked</span>
+            </div>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button @click="promote(p.number)"
+                    class="px-3 py-1 rounded bg-slate-900 text-white text-xs hover:bg-slate-700"
+                    title="Add this PR to the head list (alongside any already-pinned PRs)">
+              Add to head
+            </button>
+            <button @click="dismiss(p.number)"
+                    class="px-3 py-1 rounded bg-slate-200 text-xs hover:bg-slate-300">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      </template>
+      <div x-show="pending_review.length === 0" class="text-slate-400 italic text-sm">
+        Nothing else queued.
+      </div>
+      <div x-show="pending_review.length > 0 && filteredPendingReview.length === 0"
+           class="text-slate-400 italic text-sm">
+        No PRs by that author.
+      </div>
+    </div>
+  </section>
+
+  <!-- Activity -->
+  <section>
+    <h2 class="text-sm font-semibold uppercase text-slate-500 mb-2">Recent activity</h2>
+    <ul class="bg-white rounded-lg border divide-y text-sm">
+      <template x-for="a in activity" :key="a.id">
+        <li class="px-3 py-1.5 flex justify-between text-xs">
+          <span>
+            <template x-if="a.pr_number">
+              <a :href="'https://github.com/' + repo + '/pull/' + a.pr_number"
+                 target="_blank" rel="noopener noreferrer"
+                 class="font-mono text-blue-600 hover:underline"
+                 x-text="'#' + a.pr_number"></a>
+            </template>
+            <template x-if="!a.pr_number">
+              <span class="font-mono text-slate-500">—</span>
+            </template>
+            <span class="ml-2 font-semibold" x-text="a.action"></span>
+            <span class="ml-2 text-slate-500" x-text="a.details"></span>
+          </span>
+          <span class="text-slate-400" x-text="fmtTime(a.created_at)"></span>
+        </li>
+      </template>
+      <li x-show="activity.length === 0" class="px-3 py-2 text-slate-400 italic">No activity yet.</li>
+    </ul>
+  </section>
+</main>
+
+  <!-- My open PRs (follow-up sidebar) -->
+  <aside class="w-80 shrink-0">
+    <div class="flex items-baseline justify-between mb-2">
+      <h2 class="text-sm font-semibold uppercase text-slate-500">
+        My open PRs
+        <span class="text-slate-400">(<span x-text="myPrs.length"></span>)</span>
+      </h2>
+      <div class="text-xs text-slate-400" x-show="myPrsError" x-text="'gh error'" :title="myPrsError"></div>
+    </div>
+    <div class="space-y-2">
+      <template x-for="p in myPrs" :key="p.number">
+        <a :href="p.url" target="_blank" rel="noopener noreferrer"
+           class="block bg-white border rounded-lg p-3 hover:bg-slate-50">
+          <div class="text-sm font-medium leading-snug">
+            #<span x-text="p.number"></span> · <span x-text="p.title"></span>
+          </div>
+          <div class="mt-2 flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-semibold px-1.5 py-0.5 rounded"
+                  :class="reviewBadgeClass(p)"
+                  x-text="reviewBadgeLabel(p)"></span>
+            <span x-show="p.approvals > 0" class="text-xs text-emerald-700"
+                  x-text="'👍 ' + p.approvals"></span>
+            <span x-show="p.changes_requested > 0" class="text-xs text-red-700"
+                  x-text="'✋ ' + p.changes_requested"></span>
+            <span x-show="p.is_draft" class="text-xs text-slate-400 italic">draft</span>
+          </div>
+          <div class="mt-2 flex items-center gap-2" x-show="p.review_decision === 'APPROVED'">
+            <button @click.prevent.stop="mergePr(p.number)"
+                    :disabled="p.merging"
+                    class="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                    :class="p.merging ? 'cursor-wait' : ''"
+                    title="Merge this PR (squash + delete branch, or your configured merge skill). Pre-flight blockers still stop the merge.">
+              <span x-show="!p.merging">Merge</span>
+              <span x-show="p.merging">Merging…</span>
+            </button>
+          </div>
+          <div x-show="p.merge_error"
+               class="mt-1 text-xs text-red-700 whitespace-pre-wrap break-words"
+               x-text="p.merge_error"></div>
+        </a>
+      </template>
+      <div x-show="myPrs.length === 0 && !myPrsError" class="text-slate-400 italic text-sm">
+        No open PRs.
+      </div>
+    </div>
+  </aside>
+
+</div>
+</div>
+
+<script>
+function app() {
+  return {
+    heads: [],
+    pending_review: [],
+    awaiting_author: [],
+    watchers: [],
+    activity: [],
+    lastRefresh: '—',
+    authorFilter: '',
+    fetching: false,
+    checkingAddressed: false,
+    repo: '',
+    myPrs: [],
+    myPrsError: '',
+
+    get pendingAuthors() {
+      const counts = {};
+      for (const p of this.pending_review) {
+        counts[p.author] = (counts[p.author] || 0) + 1;
+      }
+      return Object.entries(counts)
+        .map(([login, count]) => ({ login, count }))
+        .sort((a, b) => a.login.localeCompare(b.login));
+    },
+    get filteredPendingReview() {
+      if (!this.authorFilter) return this.pending_review;
+      return this.pending_review.filter(p => p.author === this.authorFilter);
+    },
+
+    async loadMeta() {
+      try {
+        const r = await fetch('/api/meta');
+        const m = await r.json();
+        this.repo = m.repo || '';
+      } catch (e) { /* non-fatal — links just won't render until meta loads */ }
+    },
+
+    async load() {
+      const r = await fetch('/api/state');
+      const s = await r.json();
+      this.heads = s.heads || [];
+      this.pending_review = s.pending_review || [];
+      this.awaiting_author = s.awaiting_author;
+      this.watchers = s.watchers;
+      this.activity = s.activity;
+      this.lastRefresh = new Date().toLocaleTimeString();
+    },
+    poll() { setInterval(() => this.load(), 5000); },
+
+    async loadMyPrs() {
+      try {
+        const r = await fetch('/api/my_prs');
+        const s = await r.json();
+        this.myPrs = s.prs || [];
+        this.myPrsError = s.error || '';
+      } catch (e) {
+        this.myPrsError = String(e);
+      }
+    },
+    pollMyPrs() { setInterval(() => this.loadMyPrs(), 60000); },
+
+    async mergePr(n) {
+      if (!confirm(`Merge #${n}? Squash-merges and deletes the branch (or runs your configured merge skill). Pre-flight blockers (draft / not approved / CI red / conflicts) will still stop it.`)) return;
+      const pr = this.myPrs.find(p => p.number === n);
+      if (pr) pr.merging = true;  // optimistic — real state confirmed on next poll
+      const r = await fetch(`/api/my_prs/${n}/merge`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Merge failed to start: ${err.detail || 'unknown error'}`);
+        if (pr) pr.merging = false;
+      }
+      this.loadMyPrs();
+    },
+
+    reviewBadgeLabel(p) {
+      switch (p.review_decision) {
+        case 'APPROVED': return 'approved';
+        case 'CHANGES_REQUESTED': return 'changes requested';
+        case 'REVIEW_REQUIRED': return 'review required';
+        default: return 'no reviewers';
+      }
+    },
+    reviewBadgeClass(p) {
+      switch (p.review_decision) {
+        case 'APPROVED': return 'bg-emerald-100 text-emerald-800';
+        case 'CHANGES_REQUESTED': return 'bg-red-100 text-red-800';
+        case 'REVIEW_REQUIRED': return 'bg-amber-100 text-amber-800';
+        default: return 'bg-slate-100 text-slate-600';
+      }
+    },
+
+    findingsBySev(pr, sev) {
+      return (pr.findings || []).filter(f => f.severity === sev);
+    },
+    timeAgo(ts) {
+      if (!ts) return '—';
+      const t = Date.parse(ts.replace(' ', 'T') + 'Z');
+      if (isNaN(t)) return ts;
+      const secs = Math.max(0, (Date.now() - t) / 1000);
+      if (secs < 60) return 'just now';
+      if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+      if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+      return `${Math.floor(secs / 86400)}d ago`;
+    },
+    ageDays(ts) {
+      if (!ts) return 0;
+      const t = Date.parse(ts.replace(' ', 'T') + 'Z');
+      if (isNaN(t)) return 0;
+      return (Date.now() - t) / 86400000;
+    },
+    fmtTime(ts) {
+      if (!ts) return '—';
+      try { return new Date(ts.endsWith('Z') ? ts : ts + 'Z').toLocaleTimeString(); }
+      catch { return ts; }
+    },
+
+    async postFinding(id) {
+      const r = await fetch(`/api/findings/${id}/post`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Post failed: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async skipFinding(id) {
+      const r = await fetch(`/api/findings/${id}/skip`, { method: 'POST' });
+      if (!r.ok) alert(`Skip failed (HTTP ${r.status})`);
+      this.load();
+    },
+    async review(n) {
+      const r = await fetch(`/api/prs/${n}/review`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Review failed to start: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async reviewDone(n) {
+      const r = await fetch(`/api/prs/${n}/review_done`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Review done failed: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async approve(n) {
+      const r = await fetch(`/api/prs/${n}/approve`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Approve failed: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async approveIfAddressed(n) {
+      this.checkingAddressed = true;
+      try {
+        const r = await fetch(`/api/prs/${n}/approve_if_addressed`, { method: 'POST' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(`Address-check failed: ${data.detail || data.error || 'unknown error'}`);
+        } else if (data.approved) {
+          // Approved — let the UI refresh; the row will be gone.
+        } else {
+          const items = (data.verdict && data.verdict.items) || [];
+          const unresolved = items.filter(i => i.status === 'unresolved');
+          const lines = unresolved.length
+            ? unresolved.map(i => `• [${i.status}] ${i.title}\n  ${i.reasoning}`).join('\n\n')
+            : 'Verdict declined approval but listed no unresolved items.';
+          alert(`Not approved — author still owes a response.\n\n${lines}`);
+        }
+      } finally {
+        this.checkingAddressed = false;
+        this.load();
+      }
+    },
+    async runWatcher(name) {
+      this.fetching = true;
+      try {
+        const r = await fetch(`/api/watchers/${name}/run`, { method: 'POST' });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: r.statusText }));
+          alert(`Watcher failed: ${err.detail || 'unknown error'}`);
+        }
+        await this.load();
+      } finally {
+        this.fetching = false;
+      }
+    },
+    async promote(n) {
+      const r = await fetch(`/api/prs/${n}/promote`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Promote failed: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async moveOffHead(n) {
+      const r = await fetch(`/api/prs/${n}/move_off_head`, { method: 'POST' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        alert(`Move off head failed: ${err.detail || 'unknown error'}`);
+      }
+      this.load();
+    },
+    async dismiss(n) {
+      if (!confirm(`Dismiss #${n} (remove from queue without approving)?`)) return;
+      await fetch(`/api/prs/${n}/dismiss`, { method: 'POST' }); this.load();
+    },
+  };
+}
+</script>
+</body>
+</html>
