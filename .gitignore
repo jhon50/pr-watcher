@@ -5,3 +5,6 @@ __pycache__/
 *.db
 .DS_Store
 config.json
+
+# Your live review rules (copied from review_rules.example.md on first run)
+review_rules.md

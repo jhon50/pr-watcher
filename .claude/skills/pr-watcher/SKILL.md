@@ -76,7 +76,9 @@ at once.
 ## Editing rules / prompts
 
 The reviewer's judgement is governed entirely by `review_rules.md` (injected as
-`{RULES}`). Edit that file, not the Python, to change what gets flagged. The
+`{RULES}`). Edit that file, not the Python, to change what gets flagged. It's
+git-ignored and seeded from `review_rules.example.md` on first run, so edits
+never conflict on `git pull` — read fresh on every review (no restart needed). The
 prompt templates use `{PR_NUMBER}`, `{REPO}`, `{SELF_LOGIN}`, `{RULES}`,
 `{PREVIOUS_REVIEW_CONTEXT}`, `{POSTED_FINDINGS}` placeholders — keep them intact.
 

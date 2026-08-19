@@ -65,9 +65,11 @@ skill/slash-command name and merging instead runs `claude -p "/<skill> <N>"` in
 `target_repo_dir`, so your own merge workflow (post-merge chores, ticket
 updates, follow-up tests, etc.) runs.
 
-**Review rules:** edit `review_rules.md`. It's the entire ruleset the reviewer
-follows — it deliberately ignores any other `CLAUDE.md`/skills so reviews are
-reproducible. Ships with a language-agnostic default.
+**Review rules:** `run.sh` copies `review_rules.example.md` to `review_rules.md`
+on first run. Edit `review_rules.md` — it's the entire ruleset the reviewer
+follows (it deliberately ignores any other `CLAUDE.md`/skills so reviews are
+reproducible), and it's git-ignored, so your edits never conflict on `git pull`.
+Ships with a language-agnostic default.
 
 ## Run it in the background (launchd, macOS)
 
