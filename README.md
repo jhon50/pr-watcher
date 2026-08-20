@@ -90,8 +90,17 @@ rm ~/Library/LaunchAgents/pr-watcher.plist
 ```
 
 Use a different label with `PRW_LABEL=my-watcher ./install-launchd.sh`. Set
-config via a `~/.pr-watcher/config.json` file (env vars from your shell aren't
-seen by launchd).
+`PRW_*` config via a `~/.pr-watcher/config.json` file (those env vars from your
+shell aren't seen by launchd).
+
+**Claude auth under launchd:** reviews/merges spawn `claude` headless, and
+launchd doesn't inherit your shell. If you run Claude Code with a non-default
+`CLAUDE_CONFIG_DIR` (its OAuth token then lives in a per-dir keychain item) or
+authenticate with `ANTHROPIC_API_KEY`, **export those before running
+`install-launchd.sh`** — it bakes them into the plist. Miss this and every
+review fails with *"OAuth session expired and could not be refreshed"* because
+the agent falls back to the unauthenticated default config. Re-run the
+installer any time those change.
 
 > Only one process can bind the port. Don't run `./run.sh` and the launchd agent
 > at the same time.

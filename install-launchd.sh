@@ -24,12 +24,38 @@ LAUNCHD_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HO
 
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.pr-watcher"
 
-sed \
-  -e "s#__LABEL__#${LABEL}#g" \
-  -e "s#__RUN_SH__#${RUN_SH}#g" \
-  -e "s#__PATH__#${LAUNCHD_PATH}#g" \
-  -e "s#__LOG__#${LOG}#g" \
-  "$REPO_DIR/pr-watcher.plist.template" > "$PLIST"
+# The reviewer/merger spawn `claude` headless. launchd does NOT inherit your
+# shell env, so any variable Claude needs to authenticate must be baked into
+# the plist. Capture them from the shell running this installer:
+#   - CLAUDE_CONFIG_DIR: which config/keychain profile Claude uses. If you run
+#     Claude Code with a non-default config dir, its OAuth token lives in a
+#     per-dir keychain item — without this, the agent falls back to the
+#     (likely unauthenticated) default and every review fails with
+#     "OAuth session expired".
+#   - ANTHROPIC_API_KEY: if you authenticate with an API key instead of OAuth.
+ENV_ENTRIES=""
+add_env() {  # key value
+  [ -n "$2" ] || return 0
+  ENV_ENTRIES+="        <key>$1</key>
+        <string>$2</string>
+"
+}
+add_env "CLAUDE_CONFIG_DIR" "${CLAUDE_CONFIG_DIR:-}"
+add_env "ANTHROPIC_API_KEY" "${ANTHROPIC_API_KEY:-}"
+
+# Write the plist. Do __ENV_ENTRIES__ via a temp file so newlines/keys survive.
+python3 - "$REPO_DIR/pr-watcher.plist.template" "$PLIST" \
+  "$LABEL" "$RUN_SH" "$LAUNCHD_PATH" "$LOG" "$ENV_ENTRIES" <<'PY'
+import sys
+tpl_path, out_path, label, run_sh, pathv, log, env_entries = sys.argv[1:8]
+s = open(tpl_path).read()
+s = (s.replace("__LABEL__", label)
+      .replace("__RUN_SH__", run_sh)
+      .replace("__PATH__", pathv)
+      .replace("__LOG__", log)
+      .replace("__ENV_ENTRIES__", env_entries.rstrip("\n")))
+open(out_path, "w").write(s)
+PY
 
 # Reload cleanly if already loaded.
 launchctl bootout "gui/$(id -u)/${LABEL}" 2>/dev/null || true

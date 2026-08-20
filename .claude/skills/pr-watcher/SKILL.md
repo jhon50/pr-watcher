@@ -72,6 +72,12 @@ at once.
    `review_parse_failed` (Claude didn't emit a `<FINDINGS>` block).
 5. Watcher errors show in the UI's watcher status and as `error: …` in
    `watcher_runs.last_result`.
+6. Every review/merge fails with *"OAuth session expired and could not be
+   refreshed"* / "Not logged in" → the launchd agent's `claude` can't see your
+   auth. launchd doesn't inherit your shell env; if you use a non-default
+   `CLAUDE_CONFIG_DIR` or `ANTHROPIC_API_KEY`, export it and re-run
+   `./install-launchd.sh` (it bakes those into the plist). Running from a
+   terminal (`./run.sh`) masks this because the shell env is inherited.
 
 ## Editing rules / prompts
 
