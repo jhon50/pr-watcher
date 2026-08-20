@@ -6,6 +6,10 @@
 
   "skip_authors": ["some-bot", "a-teammate-you-dont-review"],
 
+  "_bot_comment": "Review bots that authenticate with a plain login (no [bot] suffix) look human. List them so the sidebar shows a bot badge instead of 'human review'. bot_label names that badge.",
+  "bot_logins": ["your-review-bot"],
+  "bot_label": "bot review",
+
   "port": 4747,
 
   "_merge_comment": "Leave merge_skill unset for a plain 'gh pr merge --squash --delete-branch'. Set it to a Claude skill/slash-command name to run your own merge workflow instead, in target_repo_dir.",

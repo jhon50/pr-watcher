@@ -381,6 +381,7 @@ function app() {
     fetching: false,
     checkingAddressed: false,
     repo: '',
+    botLabel: 'bot review',
     myPrs: [],
     myPrsError: '',
 
@@ -403,6 +404,7 @@ function app() {
         const r = await fetch('/api/meta');
         const m = await r.json();
         this.repo = m.repo || '';
+        this.botLabel = m.bot_label || 'bot review';
       } catch (e) { /* non-fatal — links just won't render until meta loads */ }
     },
 
@@ -448,9 +450,12 @@ function app() {
         case 'APPROVED': return 'approved';
         case 'CHANGES_REQUESTED': return 'changes requested';
         case 'REVIEW_REQUIRED': return 'review required';
-        // No decision yet. COMMENTED reviews don't set a decision, so
-        // distinguish "someone is reviewing" from "nobody's looked".
-        default: return p.commenters > 0 ? 'in review' : 'no reviewers';
+        // No decision yet (COMMENTED reviews don't set one). A human looking
+        // matters more than a bot, so humans win the label.
+        default:
+          if (p.human_commenters > 0) return 'human review';
+          if (p.bot_commenters > 0) return this.botLabel;
+          return 'no reviewers';
       }
     },
     reviewBadgeClass(p) {
@@ -458,9 +463,10 @@ function app() {
         case 'APPROVED': return 'bg-emerald-100 text-emerald-800';
         case 'CHANGES_REQUESTED': return 'bg-red-100 text-red-800';
         case 'REVIEW_REQUIRED': return 'bg-amber-100 text-amber-800';
-        default: return p.commenters > 0
-          ? 'bg-blue-100 text-blue-800'
-          : 'bg-slate-100 text-slate-600';
+        default:
+          if (p.human_commenters > 0) return 'bg-blue-100 text-blue-800';
+          if (p.bot_commenters > 0) return 'bg-violet-100 text-violet-800';
+          return 'bg-slate-100 text-slate-600';
       }
     },
 

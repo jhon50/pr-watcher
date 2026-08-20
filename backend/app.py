@@ -148,7 +148,11 @@ def meta():
     """Static config the frontend needs — chiefly the repo slug so it can build
     PR links without hardcoding any owner/name.
     """
-    return {"repo": config.repo(), "self_login": config.self_login()}
+    return {
+        "repo": config.repo(),
+        "self_login": config.self_login(),
+        "bot_label": config.bot_label(),
+    }
 
 
 @app.get("/api/my_prs")

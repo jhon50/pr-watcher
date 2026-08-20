@@ -110,6 +110,40 @@ def skip_authors() -> set[str]:
     return base
 
 
+@lru_cache(maxsize=1)
+def bot_logins() -> set[str]:
+    """Extra reviewer logins to treat as bots.
+
+    The `login[bot]` / `app/` conventions are detected automatically, but some
+    review bots authenticate with a plain login (e.g. an app slug with no
+    `[bot]` suffix) that looks human. List those here via PRW_BOT_LOGINS (comma
+    list) or a "bot_logins" array in the config file.
+    """
+    extra = _get("bot_logins", "PRW_BOT_LOGINS")
+    if isinstance(extra, str):
+        return {a.strip() for a in extra.split(",") if a.strip()}
+    if isinstance(extra, list):
+        return set(extra)
+    return set()
+
+
+def is_bot(login: str | None) -> bool:
+    if not login:
+        return False
+    return (
+        login.endswith("[bot]")
+        or login.startswith("app/")
+        or login in bot_logins()
+    )
+
+
+def bot_label() -> str:
+    """Sidebar badge text when only bots have reviewed. Default "bot review";
+    set PRW_BOT_LABEL / "bot_label" to name your bot (e.g. "cezbot review").
+    """
+    return _get("bot_label", "PRW_BOT_LABEL", "bot review")
+
+
 def merge_skill() -> str | None:
     """Optional Claude skill/slash-command to run on merge instead of a plain
     squash merge. When set, merging spawns `claude -p "/<skill> <number>"` in

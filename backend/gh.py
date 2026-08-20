@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 
+from . import config
 from .config import repo as _repo
 
 
@@ -52,6 +53,8 @@ def list_my_open_prs(login):
             and (r.get("author") or {}).get("login")
             and (r.get("author") or {}).get("login") != login
         }
+        human_commenters = {c for c in commenters if not config.is_bot(c)}
+        bot_commenters = commenters - human_commenters
         result.append({
             "number": p["number"],
             "title": p["title"],
@@ -61,6 +64,8 @@ def list_my_open_prs(login):
             "approvals": approvals,
             "changes_requested": changes,
             "commenters": len(commenters),
+            "human_commenters": len(human_commenters),
+            "bot_commenters": len(bot_commenters),
         })
     result.sort(key=lambda p: p["number"], reverse=True)
     return result
