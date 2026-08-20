@@ -25,11 +25,14 @@ def list_open_prs():
 
 
 def list_my_open_prs(login):
-    """Return the user's own open PRs with approval status.
+    """Return the user's own open PRs with review status.
 
     reviewDecision is GitHub's summary: APPROVED | CHANGES_REQUESTED |
-    REVIEW_REQUIRED | "" (no reviewers assigned). approvals/changes_requested
-    are raw counts across all submitted reviews for extra context.
+    REVIEW_REQUIRED | "". Note a plain COMMENTED review does NOT set a
+    decision — so a PR that people have actively commented on still reports
+    "" here. We surface `commenters` (distinct non-self reviewers who left a
+    COMMENTED review) so the UI can say "in review" instead of the misleading
+    "no reviewers". approvals/changes_requested are raw counts for context.
     """
     out = _run([
         "gh", "pr", "list", "--repo", _repo(), "--author", login,
@@ -42,6 +45,13 @@ def list_my_open_prs(login):
         reviews = p.get("reviews") or []
         approvals = sum(1 for r in reviews if r.get("state") == "APPROVED")
         changes = sum(1 for r in reviews if r.get("state") == "CHANGES_REQUESTED")
+        commenters = {
+            (r.get("author") or {}).get("login")
+            for r in reviews
+            if r.get("state") == "COMMENTED"
+            and (r.get("author") or {}).get("login")
+            and (r.get("author") or {}).get("login") != login
+        }
         result.append({
             "number": p["number"],
             "title": p["title"],
@@ -50,6 +60,7 @@ def list_my_open_prs(login):
             "review_decision": p.get("reviewDecision") or "",
             "approvals": approvals,
             "changes_requested": changes,
+            "commenters": len(commenters),
         })
     result.sort(key=lambda p: p["number"], reverse=True)
     return result
