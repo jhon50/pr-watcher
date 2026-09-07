@@ -10,8 +10,23 @@ from . import config
 from .config import repo as _repo
 
 
+# Hard cap on any single gh call. These run synchronously inside the async
+# event loop, so a gh call that hangs (network stall, API blip, an auth prompt
+# that never returns) would otherwise freeze the entire server until restart.
+# On timeout we kill gh and raise so the caller/watcher handles it — watchers
+# catch per-item and endpoints degrade rather than hang forever.
+GH_TIMEOUT = 30
+
+
 def _run(args, check=True):
-    r = subprocess.run(args, capture_output=True, text=True)
+    try:
+        r = subprocess.run(
+            args, capture_output=True, text=True, timeout=GH_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"gh timed out after {GH_TIMEOUT}s: {' '.join(args)}"
+        )
     if check and r.returncode != 0:
         raise RuntimeError(f"gh failed: {' '.join(args)}\n{r.stderr}")
     return r.stdout.strip()
@@ -249,7 +264,7 @@ def post_inline_comment(number, body, path, line, commit_sha):
             "-f", "side=RIGHT",
             "-f", f"commit_id={commit_sha}",
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=GH_TIMEOUT,
     )
     if r.returncode != 0:
         # gh's stderr is just "gh: Validation Failed (HTTP 422)". The detailed
