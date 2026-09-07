@@ -42,7 +42,7 @@ def notify(msg):
 
 # --- New PRs watcher -------------------------------------------------------
 @register("new_prs", 1200)
-async def check_new_prs():
+def check_new_prs():
     prs = gh.list_open_prs()
     new_count = 0
     with db.conn() as c:
@@ -81,7 +81,7 @@ async def check_new_prs():
 # been merged, closed, turned draft, or approved by someone else — none of
 # which need a review from us.
 @register("stale_queue", 600)
-async def check_stale_queue():
+def check_stale_queue():
     with db.conn() as c:
         tracked = c.execute(
             "SELECT number, author FROM prs WHERE status IN ('queued', 'review_failed')"
@@ -135,7 +135,7 @@ FOLLOWUP_STATUSES = ("awaiting_user", "pending_author")
 
 
 @register("followups", 900)
-async def check_followups():
+def check_followups():
     """Detect author activity on watched PRs and auto-trigger a re-review.
 
     Triggers on ANY of:
@@ -256,7 +256,7 @@ STUCK_REVIEW_THRESHOLD_SECONDS = 900  # REVIEW_TIMEOUT (600) + 5 min buffer
 
 
 @register("stuck_reviews", 300)
-async def check_stuck_reviews():
+def check_stuck_reviews():
     """Reset any PR stuck in 'reviewing' past the timeout threshold.
 
     Safe to run alongside a live review: the `updated_at` is set when the
@@ -301,7 +301,10 @@ async def _loop(name, interval, fn, initial_delay=0):
     await asyncio.sleep(initial_delay)
     while True:
         try:
-            result = await fn()
+            # Handlers are synchronous (blocking gh subprocess + sqlite). Run
+            # them in a worker thread so a slow/heavy watcher cycle can't freeze
+            # the event loop and stall the UI.
+            result = await asyncio.to_thread(fn)
             _upsert_run(name, result, interval)
         except Exception as e:
             _upsert_run(name, f"error: {e}", interval)

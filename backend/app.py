@@ -343,7 +343,8 @@ async def run_watcher(name: str):
         raise HTTPException(404, f"unknown watcher: {name}")
     wname, interval, fn = match
     try:
-        result = await fn()
+        import asyncio
+        result = await asyncio.to_thread(fn)
     except Exception as e:
         watchers._upsert_run(wname, f"error: {e}", interval)
         raise HTTPException(500, f"{wname} failed: {e}")
