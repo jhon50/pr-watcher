@@ -70,6 +70,12 @@ def list_my_open_prs(login):
         }
         human_commenters = {c for c in commenters if not config.is_bot(c)}
         bot_commenters = commenters - human_commenters
+        # Comments a real person left anywhere on the PR (inline + issue thread),
+        # excluding you and bots — the "someone commented, go look" signal.
+        try:
+            human_comments = human_comment_count(p["number"], login)
+        except Exception:
+            human_comments = 0
         result.append({
             "number": p["number"],
             "title": p["title"],
@@ -81,9 +87,38 @@ def list_my_open_prs(login):
             "commenters": len(commenters),
             "human_commenters": len(human_commenters),
             "bot_commenters": len(bot_commenters),
+            "human_comments": human_comments,
         })
     result.sort(key=lambda p: p["number"], reverse=True)
     return result
+
+
+def human_comment_count(number, self_login):
+    """Count comments on a PR left by a human other than you.
+
+    Spans both comment surfaces — inline review-thread comments and the issue
+    (PR conversation) thread — and excludes yourself plus anything config.is_bot
+    treats as a bot (covers `[bot]`/`app/` logins AND configured plain-login
+    bots like cezbot). Lets the sidebar flag "a real person commented, go look"
+    without conflating it with bot noise.
+    """
+    total = 0
+    for endpoint in (
+        f"repos/{_repo()}/pulls/{number}/comments",   # inline review comments
+        f"repos/{_repo()}/issues/{number}/comments",  # PR conversation thread
+    ):
+        try:
+            out = _run([
+                "gh", "api", "--paginate", endpoint,
+                "--jq", ".[].user.login",
+            ])
+        except Exception:
+            continue
+        for login in out.splitlines():
+            login = login.strip()
+            if login and login != self_login and not config.is_bot(login):
+                total += 1
+    return total
 
 
 def get_pr(number):

@@ -342,6 +342,10 @@
                   x-text="'👍 ' + p.approvals"></span>
             <span x-show="p.changes_requested > 0" class="text-xs text-red-700"
                   x-text="'✋ ' + p.changes_requested"></span>
+            <span x-show="p.human_comments > 0"
+                  class="text-xs font-semibold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800"
+                  x-text="'💬 new comments' + (p.human_comments > 1 ? ' (' + p.human_comments + ')' : '')"
+                  title="A person other than you (bots excluded) has commented on this PR"></span>
             <span x-show="p.is_draft" class="text-xs text-slate-400 italic">draft</span>
           </div>
           <div class="mt-2 flex items-center gap-2" x-show="p.review_decision === 'APPROVED'">
