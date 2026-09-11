@@ -191,7 +191,7 @@
     <div class="space-y-2">
       <template x-for="p in awaiting_author" :key="p.number">
         <div class="bg-white border rounded-lg p-3 flex items-center justify-between"
-             :class="p.has_new_activity ? 'border-amber-400 bg-amber-50' : ''">
+             :class="p.author_engaged ? 'border-amber-400 bg-amber-50' : ''">
           <div>
             <a :href="p.url" target="_blank" class="font-medium hover:underline">
               #<span x-text="p.number"></span> · <span x-text="p.title"></span>
@@ -200,7 +200,7 @@
               by <span x-text="p.author"></span> ·
               <span x-text="p.findings.filter(f => f.status === 'posted').length"></span> posted
               · updated <span x-text="timeAgo(p.updated_at)"></span>
-              <span x-show="p.has_new_activity" class="ml-2 text-amber-700 font-semibold">RECENT CHANGES</span>
+              <span x-show="p.author_engaged" class="ml-2 text-amber-700 font-semibold">💬 AUTHOR REPLIED</span>
             </div>
           </div>
           <div class="flex gap-2 shrink-0">

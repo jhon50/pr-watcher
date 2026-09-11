@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS prs (
   last_seen_issue_comment_at TEXT,
   pinned_at TEXT,
   parked INTEGER NOT NULL DEFAULT 0,
+  author_engaged INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

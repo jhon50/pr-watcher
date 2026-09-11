@@ -208,6 +208,7 @@ def check_followups():
                      last_seen_review_comment_at=?,
                      last_seen_issue_comment_at=?,
                      has_new_activity=1,
+                     author_engaged=1,
                      updated_at=datetime('now')
                    WHERE number=?""",
                 (sha, sha, review_at, issue_at, pr["number"]),

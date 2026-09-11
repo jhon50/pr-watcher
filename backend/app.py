@@ -326,8 +326,11 @@ async def trigger_review(number: int):
             "DELETE FROM findings WHERE pr_number=? AND status='pending'",
             (number,),
         )
+        # Re-reviewing IS acting on the author's reply — clear the persistent
+        # author_engaged flag (and the transient one).
         c.execute(
-            "UPDATE prs SET status='queued', updated_at=datetime('now') WHERE number=?",
+            """UPDATE prs SET status='queued', has_new_activity=0,
+                 author_engaged=0, updated_at=datetime('now') WHERE number=?""",
             (number,),
         )
     import asyncio

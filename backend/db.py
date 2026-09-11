@@ -13,6 +13,11 @@ _MIGRATIONS = [
     "ALTER TABLE prs ADD COLUMN last_seen_issue_comment_at TEXT",
     "ALTER TABLE prs ADD COLUMN pinned_at TEXT",
     "ALTER TABLE prs ADD COLUMN parked INTEGER NOT NULL DEFAULT 0",
+    # Persistent "the author has replied/pushed since you posted" flag. Unlike
+    # has_new_activity (transient — reset by review_done / re-review snapshots),
+    # this survives until YOU act on the PR (re-review / approve / dismiss), so
+    # a human reply can't silently vanish from the queue.
+    "ALTER TABLE prs ADD COLUMN author_engaged INTEGER NOT NULL DEFAULT 0",
 ]
 
 
